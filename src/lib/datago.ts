@@ -31,14 +31,21 @@ export function hasDataKey() {
   return !!KEY;
 }
 
+// 인증키를 항상 올바른 URL 인코딩 1회만 적용 (디코딩/인코딩 키 둘 다 허용)
+function svcKey(k: string): string {
+  try {
+    return encodeURIComponent(decodeURIComponent(k));
+  } catch {
+    return encodeURIComponent(k);
+  }
+}
+
 /** 실시간 목록조회 (키워드 검색) */
 export async function searchWelfareLive(keyword: string): Promise<Candidate[]> {
   if (!KEY) throw new Error("no_data_key");
   if (listCache.has(keyword)) return listCache.get(keyword)!;
 
-  const url = `${BASE}/NationalWelfarelistV001?serviceKey=${encodeURIComponent(
-    KEY
-  )}&callTp=L&srchKeyCode=001&pageNo=1&numOfRows=8&searchWrd=${encodeURIComponent(keyword)}`;
+  const url = `${BASE}/NationalWelfarelistV001?serviceKey=${svcKey(KEY)}&callTp=L&srchKeyCode=001&pageNo=1&numOfRows=8&searchWrd=${encodeURIComponent(keyword)}`;
   const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
   const xml = await res.text();
   if (res.status === 429 || /quota|LIMITED_NUMBER|EXCEEDS/i.test(xml)) throw new Error("한도초과(429)");
@@ -59,9 +66,7 @@ export async function getDetailLive(servId: string): Promise<Detail> {
   if (!KEY) throw new Error("no_data_key");
   if (detailCache.has(servId)) return detailCache.get(servId)!;
 
-  const url = `${BASE}/NationalWelfaredetailedV001?serviceKey=${encodeURIComponent(
-    KEY
-  )}&callTp=D&servId=${servId}`;
+  const url = `${BASE}/NationalWelfaredetailedV001?serviceKey=${svcKey(KEY)}&callTp=D&servId=${servId}`;
   const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
   const xml = await res.text();
   const applyMethods = [...xml.matchAll(/<servSeDetailLink>([\s\S]*?)<\/servSeDetailLink>/g)].map(
