@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+/* === 디자인 토큰: Apple design-md 기반 + 취약계층 접근성 보정 === */
+:root {
+  --action: #0066cc; /* Action Blue — 단일 강조색 */
+  --action-hover: #0071e3;
+  --ink: #1d1d1f; /* 본문(고대비 유지, 저대비 회색 본문 금지) */
+  --ink-soft: #424245; /* 보조 텍스트도 AA 충족 수준까지만 */
+  --canvas: #ffffff;
+  --parchment: #f5f5f7; /* 섹션 배경 */
+  --hairline: #e0e0e0;
+  --ok: #1a7f37; /* 가능 */
+  --maybe: #9a6700; /* 불확실 */
+  --check: #57606a; /* 추가확인 */
+  --ok-bg: #e6f4ea;
+  --maybe-bg: #fff4e0;
+  --check-bg: #eef0f2;
+}
+
+@theme inline {
+  --color-background: var(--canvas);
+  --color-foreground: var(--ink);
+}
+
+html {
+  font-family: "SF Pro Text", system-ui, -apple-system, "Apple SD Gothic Neo",
+    "Pretendard", "Malgun Gothic", sans-serif;
+  color: var(--ink);
+  background: var(--canvas);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  font-size: 18px; /* 접근성: 본문 최소 18px */
+  line-height: 1.6;
+}
+
+/* 큰 터치 영역 */
+button {
+  min-height: 44px;
+  cursor: pointer;
+}
+
+h1,
+h2,
+h3 {
+  font-weight: 600; /* 얇은 폰트 금지 */
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+}
+
+.focus-ring:focus-visible {
+  outline: 3px solid var(--action);
+  outline-offset: 2px;
+}
