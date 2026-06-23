@@ -1,6 +1,6 @@
 // 서버 전용: 공공데이터포털 중앙부처복지서비스(15090532) 실시간 클라이언트
 // in-memory 캐시로 트래픽(100건/일) 보호
-const KEY = process.env.DATA_GO_KR_KEY;
+const KEY = process.env.DATA_GO_KR_KEY?.trim();
 const BASE = "https://apis.data.go.kr/B554287/NationalWelfareInformationsV001";
 
 export interface Candidate {

@@ -1,6 +1,6 @@
 // 서버 전용: Claude 원시 REST 호출 헬퍼
-const KEY = process.env.ANTHROPIC_API_KEY;
-const MODEL = process.env.ANTHROPIC_MODEL || "claude-opus-4-8";
+const KEY = process.env.ANTHROPIC_API_KEY?.trim();
+const MODEL = (process.env.ANTHROPIC_MODEL || "claude-opus-4-8").trim();
 
 export function hasLLMKey() {
   return !!KEY;

@@ -5,7 +5,7 @@ export const runtime = "nodejs";
 
 // 음성 → 텍스트 (OpenAI Whisper)
 export async function POST(req: Request) {
-  const key = process.env.OPENAI_API_KEY;
+  const key = process.env.OPENAI_API_KEY?.trim();
   if (!key) {
     return NextResponse.json({ error: "no_openai_key" }, { status: 503 });
   }

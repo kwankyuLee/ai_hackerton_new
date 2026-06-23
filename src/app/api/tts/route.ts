@@ -5,7 +5,7 @@ export const runtime = "nodejs";
 
 // 텍스트 → 음성 (OpenAI TTS)
 export async function POST(req: Request) {
-  const key = process.env.OPENAI_API_KEY;
+  const key = process.env.OPENAI_API_KEY?.trim();
   if (!key) {
     return NextResponse.json({ error: "no_openai_key" }, { status: 503 });
   }

@@ -8,7 +8,7 @@ const MODEL = process.env.ANTHROPIC_MODEL || "claude-opus-4-8";
 
 // 자연어 상황 → 구조화 사실 + 공감 한마디 (Claude Opus 4.8)
 export async function POST(req: Request) {
-  const key = process.env.ANTHROPIC_API_KEY;
+  const key = process.env.ANTHROPIC_API_KEY?.trim();
   if (!key) return NextResponse.json({ error: "no_anthropic_key" }, { status: 503 });
 
   try {
