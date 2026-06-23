@@ -7,7 +7,14 @@ import { INCOME_BAND_LABEL } from "@/lib/income";
 import { recordAndTranscribe, speak, stopSpeaking } from "@/lib/voice";
 import type { IncomeBand, MatchedResult, UserFacts } from "@/lib/types";
 
-type Step = "input" | "proxy" | "results" | "detail";
+type Step = "input" | "proxy" | "searching" | "results" | "detail";
+
+const STAGES = [
+  "상황을 이해하고 검색어를 뽑는 중…",
+  "공공데이터에서 복지를 실시간 검색하는 중…",
+  "각 복지의 자격조건을 분석하는 중…",
+  "받을 가능성을 판단하고 쉬운말로 정리하는 중…",
+];
 
 const EXAMPLES = [
   "회사를 갑자기 그만뒀어요. 아이가 둘이고 월세 살아요.",
@@ -37,6 +44,8 @@ export default function Home() {
   const [selected, setSelected] = useState<MatchedResult | null>(null);
   const [ack, setAck] = useState("");
   const [thinking, setThinking] = useState(false);
+  const [stageIdx, setStageIdx] = useState(0);
+  const [source, setSource] = useState<"live" | "cache">("live");
 
   async function handleMic() {
     if (recording) {
@@ -91,7 +100,7 @@ export default function Home() {
     }
   }
 
-  function goResults() {
+  async function goResults() {
     const facts: UserFacts = {
       lifeEvent: "실직",
       householdSize,
@@ -100,8 +109,26 @@ export default function Home() {
       jobSeeking,
       raw,
     };
-    setResults(runMatch(facts));
-    setStep("results");
+    setStep("searching");
+    setStageIdx(0);
+    const timer = setInterval(() => setStageIdx((i) => Math.min(i + 1, STAGES.length - 1)), 2200);
+    try {
+      const res = await fetch("/api/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: raw, facts }),
+      });
+      const data = await res.json();
+      setResults(data.results ?? []);
+      setSource(data.source ?? "cache");
+    } catch {
+      // 네트워크 실패 시 클라이언트 폴백
+      setResults(runMatch(facts));
+      setSource("cache");
+    } finally {
+      clearInterval(timer);
+      setStep("results");
+    }
   }
 
   const possibleCount = results.filter((r) => r.verdict === "가능").length;
@@ -210,12 +237,38 @@ export default function Home() {
         </section>
       )}
 
+      {step === "searching" && (
+        <section className="mt-10">
+          <h2 className="text-2xl font-semibold">AI가 복지를 찾고 있어요</h2>
+          <p className="mt-2 text-[var(--ink-soft)]">공공데이터를 실시간으로 검색하고 분석합니다.</p>
+          <ul className="mt-6 flex flex-col gap-3">
+            {STAGES.map((s, i) => (
+              <li
+                key={i}
+                className="flex items-center gap-3 rounded-xl border p-4 text-lg transition-opacity"
+                style={{
+                  borderColor: i <= stageIdx ? "var(--action)" : "var(--hairline)",
+                  opacity: i <= stageIdx ? 1 : 0.4,
+                  background: i < stageIdx ? "var(--parchment)" : "white",
+                }}
+              >
+                <span>{i < stageIdx ? "✅" : i === stageIdx ? "⏳" : "⬜"}</span>
+                <span>{s}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {step === "results" && (
         <section className="mt-8">
           <div className="rounded-2xl bg-[var(--parchment)] p-5">
             <p className="text-lg">
               받을 수 있는 복지 <b className="text-2xl" style={{ color: "var(--action)" }}>{results.length}개</b>를 찾았어요.
               {possibleCount > 0 && <> 그중 <b style={{ color: "var(--ok)" }}>{possibleCount}개</b>는 가능성이 높아요.</>}
+            </p>
+            <p className="mt-2 text-sm font-medium" style={{ color: source === "live" ? "var(--ok)" : "var(--ink-soft)" }}>
+              {source === "live" ? "🟢 공공데이터 실시간 + AI 분석 결과" : "⚪ 사전 데이터 기반 안내 (오프라인 모드)"}
             </p>
           </div>
 
