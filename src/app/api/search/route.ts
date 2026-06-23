@@ -14,7 +14,8 @@ export async function POST(req: Request) {
   const full = [text, context].filter(Boolean).join("\n");
 
   if (!hasLLMKey() || !hasDataKey()) {
-    return NextResponse.json({ results: fallback(full), source: "cache", trace: ["사전 데이터로 안내"], excluded: 0 });
+    const missing = [!hasLLMKey() && "ANTHROPIC_API_KEY", !hasDataKey() && "DATA_GO_KR_KEY"].filter(Boolean).join(", ");
+    return NextResponse.json({ results: fallback(full), source: "cache", trace: ["사전 데이터로 안내"], excluded: 0, reason: `환경변수 없음: ${missing}` });
   }
 
   try {
@@ -50,9 +51,9 @@ export async function POST(req: Request) {
     if (candidates.length === 0) throw new Error("no_candidates");
     trace.push(`복지 ${candidates.length}건 실시간 검색됨`);
 
-    // 3) 상위 후보 상세조회 (병렬, 최대 6건)
+    // 3) 상위 후보 상세조회 (병렬, 최대 4건 — 속도/타임아웃 보호)
     const details = (
-      await Promise.all(candidates.slice(0, 6).map((c) => getDetailLive(c.servId).catch(() => null)))
+      await Promise.all(candidates.slice(0, 4).map((c) => getDetailLive(c.servId).catch(() => null)))
     ).filter((d): d is Detail => !!d && !!d.criteria);
     if (details.length === 0) throw new Error("no_details");
     trace.push(`${details.length}건 자격조건 분석`);
@@ -73,7 +74,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ results, source: "live", trace, excluded });
   } catch (e) {
     console.error("search live failed, fallback:", e);
-    return NextResponse.json({ results: fallback(full), source: "cache", trace: ["실시간 처리 실패 → 사전 데이터로 안내"], excluded: 0 });
+    return NextResponse.json({ results: fallback(full), source: "cache", trace: ["실시간 처리 실패 → 사전 데이터로 안내"], excluded: 0, reason: `실시간 실패: ${String(e).slice(0, 100)}` });
   }
 }
 

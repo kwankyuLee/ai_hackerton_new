@@ -50,6 +50,7 @@ export default function Home() {
   const [stageIdx, setStageIdx] = useState(0);
   const [source, setSource] = useState<"live" | "cache">("live");
   const [excluded, setExcluded] = useState(0);
+  const [reason, setReason] = useState("");
 
   async function handleMic() {
     if (recording) {
@@ -110,7 +111,9 @@ export default function Home() {
       setResults(data.results ?? []);
       setSource(data.source ?? "cache");
       setExcluded(data.excluded ?? 0);
+      setReason(data.reason ?? "");
     } catch {
+      setReason("네트워크 또는 응답 지연으로 실시간 처리에 실패했어요");
       const f = extractFactsHeuristic(raw);
       const facts: UserFacts = {
         lifeEvent: f.lifeEvent || "실직",
@@ -270,6 +273,9 @@ export default function Home() {
             <p className="mt-2 text-sm font-medium" style={{ color: source === "live" ? "var(--ok)" : "var(--ink-soft)" }}>
               {source === "live" ? "🟢 공공데이터 실시간 + AI 분석 결과" : "⚪ 사전 데이터 기반 안내 (오프라인 모드)"}
             </p>
+            {source === "cache" && reason && (
+              <p className="mt-1 text-xs" style={{ color: "#cc3300" }}>원인: {reason}</p>
+            )}
           </div>
 
           <div className="mt-5 flex flex-col gap-4">
