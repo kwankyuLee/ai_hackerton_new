@@ -35,7 +35,15 @@ export async function POST(req: Request) {
     trace.push(`검색어: ${keywords.join(", ")}`);
 
     // 2) data.go.kr 실시간 목록조회 (병렬) — 키워드별로 다양하게 후보 수집
-    const lists = await Promise.all(keywords.map((kw) => searchWelfareLive(kw).catch(() => [])));
+    const errs: string[] = [];
+    const lists = await Promise.all(
+      keywords.map((kw) =>
+        searchWelfareLive(kw).catch((e) => {
+          errs.push(String(e).replace("Error: ", ""));
+          return [];
+        })
+      )
+    );
     const seen = new Set<string>();
     const candidates: { servId: string; servNm: string; summary: string }[] = [];
     // 라운드로빈: 키워드마다 상위 2개씩 → 한 묶음이 독점하지 않게
@@ -48,7 +56,7 @@ export async function POST(req: Request) {
         }
       }
     }
-    if (candidates.length === 0) throw new Error("no_candidates");
+    if (candidates.length === 0) throw new Error(`공공API 검색결과 없음 ${errs[0] ? "(" + errs[0] + ")" : ""}`);
     trace.push(`복지 ${candidates.length}건 실시간 검색됨`);
 
     // 3) 상위 후보 상세조회 (병렬, 최대 4건 — 속도/타임아웃 보호)

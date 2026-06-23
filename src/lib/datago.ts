@@ -41,11 +41,10 @@ export async function searchWelfareLive(keyword: string): Promise<Candidate[]> {
   )}&callTp=L&srchKeyCode=001&pageNo=1&numOfRows=8&searchWrd=${encodeURIComponent(keyword)}`;
   const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
   const xml = await res.text();
-  if (!/<resultCode>0<\/resultCode>/.test(xml)) {
-    if (/Unauthorized|LIMITED_NUMBER|EXCEEDS/i.test(xml) || res.status !== 200) {
-      throw new Error("data_api_error");
-    }
-  }
+  if (res.status === 429 || /quota|LIMITED_NUMBER|EXCEEDS/i.test(xml)) throw new Error("한도초과(429)");
+  if (res.status === 403 || /Forbidden/i.test(xml)) throw new Error("권한거부(403·키확인)");
+  if (res.status === 401 || /Unauthorized/i.test(xml)) throw new Error("인증실패(401·키확인)");
+  if (res.status !== 200) throw new Error("HTTP " + res.status);
   const items: Candidate[] = [...xml.matchAll(/<servList>([\s\S]*?)<\/servList>/g)].map((m) => ({
     servId: (m[1].match(/<servId>(.*?)<\/servId>/) || [])[1] || "",
     servNm: clean((m[1].match(/<servNm>(.*?)<\/servNm>/) || [])[1]),
