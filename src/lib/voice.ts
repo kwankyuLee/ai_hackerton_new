@@ -1,7 +1,10 @@
 // 클라이언트 음성 유틸 — OpenAI(STT/TTS) 우선, 브라우저 Web Speech 폴백
 
+let currentAudio: HTMLAudioElement | null = null;
+
 /** 텍스트를 음성으로 읽기. OpenAI TTS → 실패 시 브라우저 TTS */
 export async function speak(text: string): Promise<void> {
+  stopSpeaking(); // 이전 재생 중지
   try {
     const res = await fetch("/api/tts", {
       method: "POST",
@@ -12,8 +15,12 @@ export async function speak(text: string): Promise<void> {
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
+    currentAudio = audio;
+    audio.onended = () => {
+      URL.revokeObjectURL(url);
+      if (currentAudio === audio) currentAudio = null;
+    };
     await audio.play();
-    audio.onended = () => URL.revokeObjectURL(url);
     return;
   } catch {
     // 폴백: 브라우저 내장 TTS
@@ -28,6 +35,11 @@ export async function speak(text: string): Promise<void> {
 }
 
 export function stopSpeaking() {
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio.currentTime = 0;
+    currentAudio = null;
+  }
   if (typeof window !== "undefined" && "speechSynthesis" in window) {
     window.speechSynthesis.cancel();
   }

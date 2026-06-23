@@ -8,6 +8,7 @@ export function hasLLMKey() {
 
 export async function askClaude(prompt: string, maxTokens = 1500): Promise<string> {
   if (!KEY) throw new Error("no_anthropic_key");
+  // 주의: claude-opus-4-8은 temperature 파라미터를 받지 않음(deprecated)
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {

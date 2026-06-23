@@ -3,11 +3,16 @@
 import { useRef, useState } from "react";
 import { runMatch } from "@/lib/match";
 import { extractFactsHeuristic } from "@/lib/extract";
-import { INCOME_BAND_LABEL } from "@/lib/income";
 import { recordAndTranscribe, speak, stopSpeaking } from "@/lib/voice";
-import type { IncomeBand, MatchedResult, UserFacts } from "@/lib/types";
+import type { MatchedResult, UserFacts } from "@/lib/types";
 
-type Step = "input" | "proxy" | "searching" | "results" | "detail";
+interface Q {
+  key: string;
+  label: string;
+  options: string[];
+}
+
+type Step = "input" | "questions" | "searching" | "results" | "detail";
 
 const STAGES = [
   "상황을 이해하고 검색어를 뽑는 중…",
@@ -34,11 +39,9 @@ export default function Home() {
   const [recording, setRecording] = useState(false);
   const recSignal = useRef<{ stop?: () => void }>({});
 
-  // 프록시 입력
-  const [householdSize, setHouseholdSize] = useState(4);
-  const [incomeBand, setIncomeBand] = useState<IncomeBand>("none");
-  const [hasChild, setHasChild] = useState(true);
-  const [jobSeeking, setJobSeeking] = useState(true);
+  // AI 되묻기 (동적 질문)
+  const [questions, setQuestions] = useState<Q[]>([]);
+  const [answers, setAnswers] = useState<Record<string, string>>({});
 
   const [results, setResults] = useState<MatchedResult[]>([]);
   const [selected, setSelected] = useState<MatchedResult | null>(null);
@@ -46,6 +49,7 @@ export default function Home() {
   const [thinking, setThinking] = useState(false);
   const [stageIdx, setStageIdx] = useState(0);
   const [source, setSource] = useState<"live" | "cache">("live");
+  const [excluded, setExcluded] = useState(0);
 
   async function handleMic() {
     if (recording) {
@@ -57,7 +61,6 @@ export default function Home() {
       setRecording(false);
       if (text) {
         setRaw((prev) => (prev ? prev + " " : "") + text);
-        applyPrefill(text);
       }
     } catch {
       setRecording(false);
@@ -65,50 +68,35 @@ export default function Home() {
     }
   }
 
-  function applyPrefill(text: string) {
-    const f = extractFactsHeuristic(text);
-    if (f.hasChild !== undefined) setHasChild(f.hasChild);
-    if (f.jobSeeking !== undefined) setJobSeeking(f.jobSeeking);
-    if (f.incomeBand) setIncomeBand(f.incomeBand);
-    if (f.householdSize) setHouseholdSize(f.householdSize);
-  }
-
-  async function goProxy() {
+  // 입력 → AI 되묻기(intake): 부족한 정보만 동적 질문 생성
+  async function goIntake() {
     if (!raw.trim()) return;
-    applyPrefill(raw); // 즉시 휴리스틱 프리필
     setThinking(true);
+    setAnswers({});
     try {
-      const res = await fetch("/api/agent", {
+      const res = await fetch("/api/intake", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: raw }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        const f = data.facts ?? {};
-        if (typeof f.householdSize === "number") setHouseholdSize(f.householdSize);
-        if (f.incomeBand) setIncomeBand(f.incomeBand as IncomeBand);
-        if (typeof f.hasChild === "boolean") setHasChild(f.hasChild);
-        if (typeof f.jobSeeking === "boolean") setJobSeeking(f.jobSeeking);
-        if (data.ack) setAck(data.ack);
-      }
+      const data = await res.json();
+      setQuestions(Array.isArray(data.questions) ? data.questions : []);
+      setAck(data.ack ?? "");
     } catch {
-      // 폴백: 휴리스틱 프리필로 진행
+      setQuestions([]);
     } finally {
       setThinking(false);
-      setStep("proxy");
+      setStep("questions");
     }
   }
 
+  // 답변 종합 → 실시간 검색
   async function goResults() {
-    const facts: UserFacts = {
-      lifeEvent: "실직",
-      householdSize,
-      incomeBand,
-      hasChild,
-      jobSeeking,
-      raw,
-    };
+    const context = questions
+      .map((q) => (answers[q.key] ? `${q.label} → ${answers[q.key]}` : ""))
+      .filter(Boolean)
+      .join("\n");
+
     setStep("searching");
     setStageIdx(0);
     const timer = setInterval(() => setStageIdx((i) => Math.min(i + 1, STAGES.length - 1)), 2200);
@@ -116,13 +104,22 @@ export default function Home() {
       const res = await fetch("/api/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: raw, facts }),
+        body: JSON.stringify({ text: raw, context }),
       });
       const data = await res.json();
       setResults(data.results ?? []);
       setSource(data.source ?? "cache");
+      setExcluded(data.excluded ?? 0);
     } catch {
-      // 네트워크 실패 시 클라이언트 폴백
+      const f = extractFactsHeuristic(raw);
+      const facts: UserFacts = {
+        lifeEvent: f.lifeEvent || "실직",
+        householdSize: f.householdSize || 1,
+        incomeBand: f.incomeBand || "none",
+        hasChild: f.hasChild ?? false,
+        jobSeeking: f.jobSeeking ?? false,
+        raw,
+      };
       setResults(runMatch(facts));
       setSource("cache");
     } finally {
@@ -163,7 +160,7 @@ export default function Home() {
                 {recording ? "● 멈추기 (듣는 중…)" : "🎤 말하기"}
               </button>
               <button
-                onClick={goProxy}
+                onClick={goIntake}
                 disabled={!raw.trim() || thinking}
                 className="focus-ring flex-1 rounded-xl px-4 py-3 text-lg font-semibold disabled:opacity-40"
                 style={{ background: "var(--ink)", color: "white" }}
@@ -178,7 +175,7 @@ export default function Home() {
             {EXAMPLES.map((ex) => (
               <button
                 key={ex}
-                onClick={() => { setRaw(ex); applyPrefill(ex); }}
+                onClick={() => setRaw(ex)}
                 className="focus-ring rounded-xl border border-[var(--hairline)] bg-white px-4 py-3 text-left text-[var(--ink)] hover:border-[var(--action)]"
               >
                 “{ex}”
@@ -188,10 +185,10 @@ export default function Home() {
         </section>
       )}
 
-      {step === "proxy" && (
+      {step === "questions" && (
         <section className="mt-8">
-          <h2 className="text-2xl font-semibold">몇 가지만 확인할게요</h2>
-          <p className="mt-2 text-[var(--ink-soft)]">정확한 안내를 위해서예요. 대략이면 충분해요.</p>
+          <h2 className="text-2xl font-semibold">몇 가지만 여쭤볼게요</h2>
+          <p className="mt-2 text-[var(--ink-soft)]">정확히 찾기 위해 AI가 꼭 필요한 것만 물어봐요.</p>
 
           {ack && (
             <div className="mt-4 rounded-2xl border border-[var(--hairline)] bg-[var(--parchment)] p-4">
@@ -200,31 +197,23 @@ export default function Home() {
             </div>
           )}
 
-          <Question label="가족이 몇 명인가요?">
-            {[1, 2, 3, 4, 5].map((n) => (
-              <Choice key={n} active={householdSize === n} onClick={() => setHouseholdSize(n)}>
-                {n === 5 ? "5명+" : `${n}명`}
-              </Choice>
-            ))}
-          </Question>
+          {questions.length === 0 && (
+            <p className="mt-6 text-[var(--ink-soft)]">추가로 여쭤볼 게 없어요. 바로 찾아볼게요.</p>
+          )}
 
-          <Question label="요즘 한 달 수입은 어느 정도인가요?">
-            {(Object.keys(INCOME_BAND_LABEL) as IncomeBand[]).map((b) => (
-              <Choice key={b} active={incomeBand === b} onClick={() => setIncomeBand(b)}>
-                {INCOME_BAND_LABEL[b]}
-              </Choice>
-            ))}
-          </Question>
-
-          <Question label="초·중·고에 다니는 자녀가 있나요?">
-            <Choice active={hasChild} onClick={() => setHasChild(true)}>네, 있어요</Choice>
-            <Choice active={!hasChild} onClick={() => setHasChild(false)}>아니요</Choice>
-          </Question>
-
-          <Question label="다시 일자리를 찾고 계신가요?">
-            <Choice active={jobSeeking} onClick={() => setJobSeeking(true)}>네, 구직 중</Choice>
-            <Choice active={!jobSeeking} onClick={() => setJobSeeking(false)}>아니요</Choice>
-          </Question>
+          {questions.map((q) => (
+            <Question key={q.key} label={q.label}>
+              {q.options.map((opt) => (
+                <Choice
+                  key={opt}
+                  active={answers[q.key] === opt}
+                  onClick={() => setAnswers((a) => ({ ...a, [q.key]: opt }))}
+                >
+                  {opt}
+                </Choice>
+              ))}
+            </Question>
+          ))}
 
           <div className="mt-8 flex gap-2">
             <button onClick={() => setStep("input")} className="focus-ring rounded-xl border border-[var(--hairline)] px-5 py-3 text-lg font-semibold">
@@ -263,10 +252,21 @@ export default function Home() {
       {step === "results" && (
         <section className="mt-8">
           <div className="rounded-2xl bg-[var(--parchment)] p-5">
-            <p className="text-lg">
-              받을 수 있는 복지 <b className="text-2xl" style={{ color: "var(--action)" }}>{results.length}개</b>를 찾았어요.
-              {possibleCount > 0 && <> 그중 <b style={{ color: "var(--ok)" }}>{possibleCount}개</b>는 가능성이 높아요.</>}
-            </p>
+            {results.length > 0 ? (
+              <p className="text-lg">
+                해당될 만한 복지 <b className="text-2xl" style={{ color: "var(--action)" }}>{results.length}개</b>를 찾았어요.
+                {possibleCount > 0 && <> 그중 <b style={{ color: "var(--ok)" }}>{possibleCount}개</b>는 가능성이 높아요.</>}
+              </p>
+            ) : (
+              <p className="text-lg">
+                입력하신 상황에 <b>딱 맞는 복지를 찾지 못했어요.</b> 조건을 바꿔 다시 찾아보거나, 주민센터(129)에 문의해보세요.
+              </p>
+            )}
+            {excluded > 0 && (
+              <p className="mt-1 text-sm text-[var(--ink-soft)]">
+                검토했지만 조건이 맞지 않아 {excluded}개는 제외했어요.
+              </p>
+            )}
             <p className="mt-2 text-sm font-medium" style={{ color: source === "live" ? "var(--ok)" : "var(--ink-soft)" }}>
               {source === "live" ? "🟢 공공데이터 실시간 + AI 분석 결과" : "⚪ 사전 데이터 기반 안내 (오프라인 모드)"}
             </p>
@@ -282,7 +282,7 @@ export default function Home() {
             ))}
           </div>
 
-          <button onClick={() => setStep("proxy")} className="focus-ring mt-6 rounded-xl border border-[var(--hairline)] px-5 py-3 font-semibold">
+          <button onClick={() => { stopSpeaking(); setStep("questions"); }} className="focus-ring mt-6 rounded-xl border border-[var(--hairline)] px-5 py-3 font-semibold">
             ← 조건 다시 입력
           </button>
         </section>
@@ -354,21 +354,25 @@ function ResultCard({ r, onDetail }: { r: MatchedResult; onDetail: () => void })
         <button onClick={() => speak(`${r.program.name}. ${r.program.easyCache.easy}`)} className="focus-ring rounded-lg border border-[var(--hairline)] px-3 py-2 text-sm font-semibold">
           🔊 듣기
         </button>
+        <button onClick={() => stopSpeaking()} className="focus-ring rounded-lg border border-[var(--hairline)] px-3 py-2 text-sm font-semibold">
+          ⏹ 멈춤
+        </button>
         <button onClick={() => setShowReason((v) => !v)} className="focus-ring rounded-lg border border-[var(--hairline)] px-3 py-2 text-sm font-semibold">
           왜 되나요?
         </button>
-        <button onClick={onDetail} className="focus-ring rounded-lg px-3 py-2 text-sm font-semibold text-white" style={{ background: "var(--action)" }}>
+        <button onClick={() => { stopSpeaking(); onDetail(); }} className="focus-ring rounded-lg px-3 py-2 text-sm font-semibold text-white" style={{ background: "var(--action)" }}>
           자세히 · 신청준비 →
         </button>
       </div>
 
       {showReason && (
-        <div className="mt-3 rounded-xl bg-[var(--parchment)] p-3 text-[15px]">
-          <p>{r.reason}</p>
+        <div className="mt-3 rounded-xl bg-[var(--parchment)] p-4 text-[15px] leading-relaxed">
+          <p className="mb-2 text-sm font-bold" style={{ color: "var(--action)" }}>왜 해당될까요?</p>
+          <p><Rich text={r.reason} /></p>
           {r.missing.length > 0 && (
             <p className="mt-2 text-[var(--ink-soft)]">확인이 필요해요: {r.missing.join(", ")}</p>
           )}
-          <p className="mt-2 text-[var(--ink-soft)]">근거: “{r.program.criteria}” ({r.program.law})</p>
+          <p className="mt-3 text-xs text-[var(--ink-soft)]">📋 공공데이터(복지로) 선정기준에 근거한 AI 분석</p>
         </div>
       )}
     </article>
@@ -380,7 +384,7 @@ function DetailView({ r, onBack }: { r: MatchedResult; onBack: () => void }) {
   const [checked, setChecked] = useState<boolean[]>(p.documents.map(() => false));
   return (
     <section className="mt-8">
-      <button onClick={onBack} className="focus-ring mb-4 rounded-lg border border-[var(--hairline)] px-3 py-2 text-sm font-semibold">← 목록</button>
+      <button onClick={() => { stopSpeaking(); onBack(); }} className="focus-ring mb-4 rounded-lg border border-[var(--hairline)] px-3 py-2 text-sm font-semibold">← 목록</button>
 
       <div className="flex items-start justify-between gap-3">
         <h2 className="text-2xl font-semibold">{p.name}</h2>
@@ -390,7 +394,10 @@ function DetailView({ r, onBack }: { r: MatchedResult; onBack: () => void }) {
       <div className="mt-4 rounded-2xl bg-[var(--parchment)] p-5">
         <div className="flex items-center justify-between">
           <p className="font-semibold">쉬운 설명</p>
-          <button onClick={() => speak(p.easyCache.easy)} className="focus-ring rounded-lg border border-[var(--hairline)] bg-white px-3 py-2 text-sm font-semibold">🔊 듣기</button>
+          <div className="flex gap-2">
+            <button onClick={() => speak(p.easyCache.easy)} className="focus-ring rounded-lg border border-[var(--hairline)] bg-white px-3 py-2 text-sm font-semibold">🔊 듣기</button>
+            <button onClick={() => stopSpeaking()} className="focus-ring rounded-lg border border-[var(--hairline)] bg-white px-3 py-2 text-sm font-semibold">⏹ 멈춤</button>
+          </div>
         </div>
         <p className="mt-2 text-lg leading-relaxed">{p.easyCache.easy}</p>
       </div>
@@ -444,6 +451,22 @@ function DetailView({ r, onBack }: { r: MatchedResult; onBack: () => void }) {
         ※ 이 안내는 가능성 안내예요. 최종 자격은 주민센터·복지로에서 확인됩니다.
       </p>
     </section>
+  );
+}
+
+// **굵게** 표시를 <strong>으로 렌더링
+function Rich({ text }: { text: string }) {
+  const parts = (text || "").split(/(\*\*[^*]+\*\*)/g);
+  return (
+    <>
+      {parts.map((p, i) =>
+        p.startsWith("**") && p.endsWith("**") ? (
+          <strong key={i} style={{ color: "var(--ink)" }}>{p.slice(2, -2)}</strong>
+        ) : (
+          <span key={i}>{p}</span>
+        )
+      )}
+    </>
   );
 }
 
